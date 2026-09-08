@@ -1,0 +1,25 @@
+{
+  "name": "physics101",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.17.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@types/three": "^0.185.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^5.9.2",
+    "vite": "^8.2.2"
+  }
+}

@@ -1,0 +1,265 @@
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1a1d22;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.app,
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hud-left {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.scene-hint {
+  max-width: 320px;
+  color: #e8edf5;
+  background: rgba(12, 14, 18, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.scene-hint strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.gravity-toggle {
+  pointer-events: auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  color: #e8edf5;
+  background: #2a3340;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.gravity-toggle:hover:not(:disabled) {
+  background: #3a4656;
+}
+
+.gravity-toggle:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.gravity-toggle.is-on {
+  color: #11141a;
+  background: #7ec8e3;
+}
+
+.gravity-toggle.is-on:hover:not(:disabled) {
+  background: #9ad7ed;
+}
+
+.hud-right {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 276px;
+  pointer-events: none;
+}
+
+.selection-dock {
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.selection-dialog {
+  width: 260px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  color: #e8edf5;
+  background: rgba(12, 15, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  transform: translateX(0);
+  animation: selection-pop 220ms ease-out;
+}
+
+.selection-kicker {
+  margin: 0 0 4px;
+  color: #8b97a8;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.selection-name {
+  margin: 0 0 12px;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.selection-axes {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.selection-axis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid;
+  border-radius: 8px;
+  background: rgba(17, 20, 26, 0.9);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.selection-axis dt {
+  margin: 0;
+}
+
+.selection-axis dd {
+  margin: 0;
+}
+
+.selection-axis-x {
+  color: #ff6b81;
+  border-color: rgba(255, 54, 83, 0.45);
+}
+
+.selection-axis-y {
+  color: #8adb00;
+  border-color: rgba(138, 219, 0, 0.4);
+}
+
+.selection-axis-z {
+  color: #4ca6ff;
+  border-color: rgba(44, 143, 255, 0.45);
+}
+
+.control-dialog {
+  width: 260px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  color: #e8edf5;
+  background: rgba(12, 15, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  animation: selection-pop 220ms ease-out;
+}
+
+.control-copy {
+  margin: 0 0 12px;
+  color: #b7c0ce;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.angle-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #8b97a8;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.angle-field input[type="range"] {
+  width: 100%;
+  accent-color: #7ec8e3;
+  cursor: pointer;
+}
+
+.angle-field input[type="range"]:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.angle-range {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #8b97a8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.angle-range strong {
+  color: #e8edf5;
+  font-size: 0.92rem;
+}
+
+.control-angle {
+  margin: 10px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #8b97a8;
+  font-size: 0.78rem;
+}
+
+.control-angle strong {
+  color: #e8edf5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.lock-state {
+  color: #7ec8e3;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lock-state.is-locked {
+  color: #8adb00;
+}
+
+@keyframes selection-pop {
+  from {
+    opacity: 0;
+    transform: translateX(28%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
