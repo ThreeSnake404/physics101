@@ -37,7 +37,7 @@ import { RapierPhysics } from "../rapierPhysics";
 import { findSelectablePart, roundCoord, setSelectionHighlight, uniquifyMaterials } from "./selection";
 import type { JointControlState, PhysicsSceneApi, SelectionInfo } from "./types";
 
-const MODEL_URL = "/models/two-legs_v0-1.gltf";
+const MODEL_URL = `${import.meta.env.BASE_URL}models/two-legs_v0-1.gltf`;
 const GROUND_SIZE = 40;
 const GROUND_HALF_THICKNESS = 0.25;
 const DROP_CLEARANCE = 0.35;
