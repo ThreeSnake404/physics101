@@ -1,11 +1,13 @@
 import {
   AxesHelper,
+  Camera,
   Color,
   DirectionalLight,
   GridHelper,
   HemisphereLight,
   Mesh,
   MeshStandardMaterial,
+  OrthographicCamera,
   PerspectiveCamera,
   PlaneGeometry,
   Raycaster,
@@ -35,7 +37,13 @@ import {
 } from "../modelParts";
 import { RapierPhysics } from "../rapierPhysics";
 import { findSelectablePart, roundCoord, setSelectionHighlight, uniquifyMaterials } from "./selection";
-import type { JointControlState, PhysicsSceneApi, SelectionInfo } from "./types";
+import type {
+  JointControlState,
+  PhysicsSceneApi,
+  PresetViewName,
+  SelectionInfo,
+  ViewState,
+} from "./types";
 
 const MODEL_URL = `${import.meta.env.BASE_URL}models/two-legs_v0-1.gltf`;
 const GROUND_SIZE = 40;
@@ -46,21 +54,18 @@ const CLICK_PX = 6;
 export type CreatePhysicsSceneOptions = {
   onSelectionChange: (selection: SelectionInfo | null) => void;
   onJointChange: (state: JointControlState | null) => void;
+  onViewStateChange?: (state: ViewState) => void;
 };
 
-function frameFrontView(
-  camera: PerspectiveCamera,
-  controls: OrbitControls,
-  center: Vector3,
-  size: Vector3,
-) {
-  const span = Math.max(size.x, size.y, 1) * 1.7;
-  const distance = Math.max(span, size.z + 4, 8);
-  camera.position.set(center.x, center.y, center.z + distance);
-  camera.up.set(0, 1, 0);
-  camera.lookAt(center);
-  controls.target.copy(center);
-  controls.update();
+function isTypingInput(el: Element | null): boolean {
+  if (!el || !(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable) return true;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) {
+    const textTypes = ["text", "password", "email", "number", "search", "tel", "url"];
+    return textTypes.includes(el.type);
+  }
+  return false;
 }
 
 function enableShadows(root: Object3D) {
@@ -104,12 +109,13 @@ export async function createPhysicsScene(
   const scene = new Scene();
   scene.background = new Color(0x1a1d22);
 
-  const camera = new PerspectiveCamera(50, host.clientWidth / host.clientHeight, 0.1, 200);
-  camera.position.set(0, 1.6, 12);
-  camera.up.set(0, 1, 0);
-  camera.lookAt(0, 1.2, 0);
+  const aspect = host.clientWidth / Math.max(host.clientHeight, 1);
+  const perspCamera = new PerspectiveCamera(50, aspect, 0.1, 500);
+  const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 500);
+  let isOrtho = false;
+  let activeCamera: Camera = perspCamera;
 
-  const controls = new OrbitControls(camera, renderer.domElement);
+  const controls = new OrbitControls<Camera>(activeCamera, renderer.domElement);
   controls.target.set(0, 1.2, 0);
   controls.enableDamping = true;
   controls.update();
@@ -209,7 +215,166 @@ export async function createPhysicsScene(
   }
 
   const { center, size } = boundingBoxOf(parts);
-  frameFrontView(camera, controls, center, size);
+  const span = Math.max(size.x, size.y, 1) * 1.7;
+  const defaultDistance = Math.max(span, size.z + 4, 8);
+
+  function applyFrontView() {
+    perspCamera.position.set(center.x, center.y, center.z + defaultDistance);
+    perspCamera.up.set(0, 1, 0);
+    perspCamera.lookAt(center);
+    perspCamera.updateProjectionMatrix();
+
+    const halfFovRad = (perspCamera.fov * Math.PI) / 360;
+    const halfHeight = defaultDistance * Math.tan(halfFovRad);
+    const halfWidth = halfHeight * (host.clientWidth / Math.max(host.clientHeight, 1));
+    orthoCamera.left = -halfWidth;
+    orthoCamera.right = halfWidth;
+    orthoCamera.top = halfHeight;
+    orthoCamera.bottom = -halfHeight;
+    orthoCamera.zoom = 1;
+    orthoCamera.position.set(center.x, center.y, center.z + defaultDistance);
+    orthoCamera.up.set(0, 1, 0);
+    orthoCamera.lookAt(center);
+    orthoCamera.updateProjectionMatrix();
+
+    controls.target.copy(center);
+    controls.update();
+  }
+
+  applyFrontView();
+
+  let lastViewState: ViewState | null = null;
+
+  function detectPresetView(): PresetViewName | null {
+    const target = controls.target;
+    const dir = new Vector3().subVectors(activeCamera.position, target).normalize();
+    const EPS = 0.03;
+
+    // Front: +Z points directly at screen
+    if (Math.abs(dir.x) < EPS && Math.abs(dir.y) < EPS && Math.abs(dir.z - 1) < EPS) {
+      return "front";
+    }
+    // Top: +Y points directly at screen
+    if (Math.abs(dir.x) < EPS && Math.abs(dir.y - 1) < EPS && Math.abs(dir.z) < EPS) {
+      return "top";
+    }
+    // Right: +X points directly at screen
+    if (Math.abs(dir.x - 1) < EPS && Math.abs(dir.y) < EPS && Math.abs(dir.z) < EPS) {
+      return "right";
+    }
+    return null;
+  }
+
+  function emitViewState() {
+    const activeView = detectPresetView();
+    if (
+      lastViewState &&
+      lastViewState.isOrtho === isOrtho &&
+      lastViewState.activeView === activeView
+    ) {
+      return;
+    }
+    lastViewState = { isOrtho, activeView };
+    options.onViewStateChange?.(lastViewState);
+  }
+
+  function setView(view: PresetViewName) {
+    const target = controls.target;
+    let distance: number;
+
+    if (isOrtho) {
+      const halfH = ((orthoCamera.top - orthoCamera.bottom) / 2) / orthoCamera.zoom;
+      const halfFovRad = (perspCamera.fov * Math.PI) / 360;
+      distance = halfH / Math.tan(halfFovRad);
+    } else {
+      distance = perspCamera.position.distanceTo(target);
+    }
+
+    if (distance < 0.5 || !Number.isFinite(distance)) {
+      distance = defaultDistance;
+    }
+
+    let offset: Vector3;
+    if (view === "front") {
+      // 1. Number pad 1: Front view, where z axis points directly at the view screen.
+      offset = new Vector3(0, 0, distance);
+    } else if (view === "top") {
+      // 2. Number pad 7: Top view, where y axis points directly at the view screen.
+      offset = new Vector3(0, distance, 0.0001);
+    } else {
+      // 3. Number pad 3: Right view, where x axis points directly at the view screen.
+      offset = new Vector3(distance, 0, 0);
+    }
+
+    const newPos = target.clone().add(offset);
+
+    perspCamera.position.copy(newPos);
+    perspCamera.up.set(0, 1, 0);
+    perspCamera.lookAt(target);
+    perspCamera.updateProjectionMatrix();
+
+    orthoCamera.position.copy(newPos);
+    orthoCamera.up.set(0, 1, 0);
+    orthoCamera.lookAt(target);
+    orthoCamera.updateProjectionMatrix();
+
+    controls.target.copy(target);
+    controls.update();
+    emitViewState();
+  }
+
+  function toggleOrthoPersp() {
+    const target = controls.target;
+    const width = host.clientWidth;
+    const height = Math.max(host.clientHeight, 1);
+    const aspect = width / height;
+    const halfFovRad = (perspCamera.fov * Math.PI) / 360;
+
+    if (!isOrtho) {
+      // Switch to Orthographic
+      const distance = perspCamera.position.distanceTo(target);
+      const halfHeight = distance * Math.tan(halfFovRad);
+      const halfWidth = halfHeight * aspect;
+
+      orthoCamera.left = -halfWidth;
+      orthoCamera.right = halfWidth;
+      orthoCamera.top = halfHeight;
+      orthoCamera.bottom = -halfHeight;
+      orthoCamera.zoom = 1;
+      orthoCamera.position.copy(perspCamera.position);
+      orthoCamera.quaternion.copy(perspCamera.quaternion);
+      orthoCamera.up.copy(perspCamera.up);
+      orthoCamera.updateProjectionMatrix();
+
+      isOrtho = true;
+      activeCamera = orthoCamera;
+      controls.object = orthoCamera;
+      controls.update();
+    } else {
+      // Switch to Perspective
+      const halfHeight = ((orthoCamera.top - orthoCamera.bottom) / 2) / orthoCamera.zoom;
+      let distance = halfHeight / Math.tan(halfFovRad);
+      if (distance < 0.5 || !Number.isFinite(distance)) {
+        distance = defaultDistance;
+      }
+      const dir = new Vector3().subVectors(orthoCamera.position, target).normalize();
+      if (dir.lengthSq() === 0) dir.set(0, 0, 1);
+
+      perspCamera.position.copy(target).addScaledVector(dir, distance);
+      perspCamera.quaternion.copy(orthoCamera.quaternion);
+      perspCamera.up.copy(orthoCamera.up);
+      perspCamera.updateProjectionMatrix();
+
+      isOrtho = false;
+      activeCamera = perspCamera;
+      controls.object = perspCamera;
+      controls.update();
+    }
+
+    emitViewState();
+  }
+
+  emitViewState();
 
   const raycaster = new Raycaster();
   const pointer = new Vector2();
@@ -276,7 +441,7 @@ export async function createPhysicsScene(
     const bounds = renderer.domElement.getBoundingClientRect();
     pointer.x = ((clientX - bounds.left) / bounds.width) * 2 - 1;
     pointer.y = -((clientY - bounds.top) / bounds.height) * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
+    raycaster.setFromCamera(pointer, activeCamera);
     const hits = raycaster.intersectObjects(pickables, false);
     const part = hits.length > 0 ? findSelectablePart(hits[0].object) : null;
     if (part && part === selected) {
@@ -304,14 +469,47 @@ export async function createPhysicsScene(
     const width = host.clientWidth;
     const height = host.clientHeight;
     if (width === 0 || height === 0) return;
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
+    const aspect = width / height;
+
+    perspCamera.aspect = aspect;
+    perspCamera.updateProjectionMatrix();
+
+    const currentHalfHeight = (orthoCamera.top - orthoCamera.bottom) / 2;
+    orthoCamera.left = -currentHalfHeight * aspect;
+    orthoCamera.right = currentHalfHeight * aspect;
+    orthoCamera.updateProjectionMatrix();
+
     renderer.setSize(width, height);
+  }
+
+  function onControlsChange() {
+    emitViewState();
+  }
+
+  function onKeyDown(event: KeyboardEvent) {
+    if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (isTypingInput(document.activeElement)) return;
+
+    if (event.code === "Numpad1" || event.key === "1") {
+      event.preventDefault();
+      setView("front");
+    } else if (event.code === "Numpad7" || event.key === "7") {
+      event.preventDefault();
+      setView("top");
+    } else if (event.code === "Numpad3" || event.key === "3") {
+      event.preventDefault();
+      setView("right");
+    } else if (event.code === "Numpad5" || event.key === "5") {
+      event.preventDefault();
+      toggleOrthoPersp();
+    }
   }
 
   renderer.domElement.addEventListener("pointerdown", onPointerDown);
   renderer.domElement.addEventListener("pointerup", onPointerUp);
   window.addEventListener("resize", onResize);
+  window.addEventListener("keydown", onKeyDown);
+  controls.addEventListener("change", onControlsChange);
 
   const timer = new Timer();
 
@@ -323,7 +521,7 @@ export async function createPhysicsScene(
     if (selected) emitSelection(selectionFromPart(selected));
     emitJoint(jointStateFor(selected));
     controls.update();
-    renderer.render(scene, camera);
+    renderer.render(scene, activeCamera);
   }
 
   animate();
@@ -335,6 +533,12 @@ export async function createPhysicsScene(
     setJointTarget(name: string, angleDeg: number) {
       physics.setJointTarget(name, (angleDeg * Math.PI) / 180);
     },
+    setView(view: PresetViewName) {
+      setView(view);
+    },
+    toggleOrthoPersp() {
+      toggleOrthoPersp();
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -342,6 +546,8 @@ export async function createPhysicsScene(
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("keydown", onKeyDown);
+      controls.removeEventListener("change", onControlsChange);
       controls.dispose();
       renderer.dispose();
       renderer.domElement.remove();

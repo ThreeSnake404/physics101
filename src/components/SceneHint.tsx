@@ -10,7 +10,9 @@ export function SceneHint({ ready, error }: SceneHintProps) {
       {error ? (
         <span>{error}</span>
       ) : ready ? (
-        <span>Front view: +Z toward the screen. Click a part to inspect it.</span>
+        <span>
+          Views: Front (Pad 1), Top (Pad 7), Right (Pad 3), Ortho/Persp (Pad 5).
+        </span>
       ) : (
         <span>Loading physics…</span>
       )}

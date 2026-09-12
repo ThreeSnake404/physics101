@@ -1,3 +1,10 @@
+export type PresetViewName = "front" | "top" | "right";
+
+export type ViewState = {
+  isOrtho: boolean;
+  activeView: PresetViewName | null;
+};
+
 export type SelectionInfo = {
   name: string;
   x: number;
@@ -19,5 +26,7 @@ export type JointControlState = {
 export type PhysicsSceneApi = {
   setGravityEnabled: (enabled: boolean) => void;
   setJointTarget: (name: string, angleDeg: number) => void;
+  setView: (view: PresetViewName) => void;
+  toggleOrthoPersp: () => void;
   dispose: () => void;
 };
