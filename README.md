@@ -42,4 +42,4 @@ Hinges use each part’s authored Blender origin as the pivot.
 
 ## Model
 
-Runtime assets live in `public/models/` (`two-legs_v0-1.gltf` + `.bin`). Blender sources and earlier exports are also checked in at the repo root.
+Runtime assets live in `public/models/` (`two-legs_v0-3.glb`). Blender sources and earlier exports (`v0-0`, `v0-1`, `v0-2`, `v0-3`) are also checked in at the repo root.

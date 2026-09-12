@@ -45,7 +45,7 @@ import type {
   ViewState,
 } from "./types";
 
-const MODEL_URL = `${import.meta.env.BASE_URL}models/two-legs_v0-1.gltf`;
+const MODEL_URL = `${import.meta.env.BASE_URL}models/two-legs_v0-3.glb`;
 const GROUND_SIZE = 40;
 const GROUND_HALF_THICKNESS = 0.25;
 const DROP_CLEARANCE = 0.35;
