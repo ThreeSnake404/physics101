@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
+import { BalanceHud } from "./components/BalanceHud";
 import { GravityToggle } from "./components/GravityToggle";
 import { RotatePartDialog } from "./components/RotatePartDialog";
 import { SceneHint } from "./components/SceneHint";
@@ -16,6 +17,9 @@ export default function App() {
     selection,
     joint,
     viewState,
+    balanceState,
+    resetPose,
+    triggerStepCycle,
     setGravityEnabled,
     setJointTarget,
     setView,
@@ -30,6 +34,14 @@ export default function App() {
     });
   }, [setGravityEnabled]);
 
+  const handleResetPose = useCallback(() => {
+    resetPose();
+  }, [resetPose]);
+
+  const handleStepCycle = useCallback(() => {
+    triggerStepCycle();
+  }, [triggerStepCycle]);
+
   const handleTargetChange = useCallback(
     (next: number) => {
       if (!selection) return;
@@ -43,7 +55,9 @@ export default function App() {
       <div ref={hostRef} className="viewport" />
       <div className="hud-left">
         <SceneHint ready={ready} error={error} />
-        <GravityToggle enabled={gravityOn} disabled={!ready} onToggle={toggleGravity} />
+        <div className="hud-row">
+          <GravityToggle enabled={gravityOn} disabled={!ready} onToggle={toggleGravity} />
+        </div>
         <ViewControls
           disabled={!ready}
           isOrtho={viewState.isOrtho}
@@ -52,6 +66,13 @@ export default function App() {
           onTop={() => setView("top")}
           onRight={() => setView("right")}
           onToggleOrtho={toggleOrthoPersp}
+        />
+        <BalanceHud
+          state={balanceState}
+          gravityEnabled={gravityOn}
+          disabled={!ready}
+          onReset={handleResetPose}
+          onStep={handleStepCycle}
         />
       </div>
       <aside className="hud-right">

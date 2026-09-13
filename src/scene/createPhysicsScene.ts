@@ -10,6 +10,7 @@ import {
   OrthographicCamera,
   PerspectiveCamera,
   PlaneGeometry,
+  Quaternion,
   Raycaster,
   Scene,
   Timer,
@@ -26,18 +27,21 @@ import {
   findHingeDef,
   findPartRoots,
   flattenParts,
-  HINGE_LIMIT,
   hingeAxisLabel,
   hingeAxisVector,
+  hingeLimitsFor,
   isMesh,
   LEG_HINGES,
   liftAboveGround,
   meshesOwnedBy,
+  hingePivotOf,
   worldOriginOf,
 } from "../modelParts";
 import { RapierPhysics } from "../rapierPhysics";
+import { BalanceController } from "./balanceController";
 import { findSelectablePart, roundCoord, setSelectionHighlight, uniquifyMaterials } from "./selection";
 import type {
+  BalanceState,
   JointControlState,
   PhysicsSceneApi,
   PresetViewName,
@@ -45,7 +49,7 @@ import type {
   ViewState,
 } from "./types";
 
-const MODEL_URL = `${import.meta.env.BASE_URL}models/two-legs_v0-3.glb`;
+const MODEL_URL = `${import.meta.env.BASE_URL}models/two-legs_v0-5.glb`;
 const GROUND_SIZE = 40;
 const GROUND_HALF_THICKNESS = 0.25;
 const DROP_CLEARANCE = 0.35;
@@ -55,6 +59,7 @@ export type CreatePhysicsSceneOptions = {
   onSelectionChange: (selection: SelectionInfo | null) => void;
   onJointChange: (state: JointControlState | null) => void;
   onViewStateChange?: (state: ViewState) => void;
+  onBalanceChange?: (state: BalanceState) => void;
 };
 
 function isTypingInput(el: Element | null): boolean {
@@ -190,13 +195,12 @@ export async function createPhysicsScene(
     physics.addObject(part, meshes, true, 0.05, physicsRotation.get(part.name));
   }
 
-  // Chassis is the test stand: it can fall under gravity, but it must not
-  // tip or spin when a motor fires. Otherwise the free body chain tumbles.
+  // Allow Chassis to be fully affected by gravity and dynamics (free 6-DOF translation & rotation)
   const chassisBody = chassis ? physics.getHandle(chassis)?.body : null;
   if (chassisBody) {
-    chassisBody.lockRotations(true, true);
-    chassisBody.restrictTranslations(false, true, false, true);
-    chassisBody.setAdditionalMass(20, true);
+    chassisBody.lockRotations(false, true);
+    chassisBody.setEnabledTranslations(true, true, true, true);
+    chassisBody.setGravityScale(1.0, true);
   }
 
   for (const hinge of LEG_HINGES) {
@@ -207,9 +211,9 @@ export async function createPhysicsScene(
       hinge.child,
       parent,
       child,
-      worldOriginOf(child),
+      hingePivotOf(hinge, partsByName),
       hingeAxisVector(hinge.axis),
-      { min: -HINGE_LIMIT, max: HINGE_LIMIT },
+      hingeLimitsFor(hinge.child),
     );
     if (joint) physics.bindHinge(joint);
   }
@@ -217,6 +221,37 @@ export async function createPhysicsScene(
   const { center, size } = boundingBoxOf(parts);
   const span = Math.max(size.x, size.y, 1) * 1.7;
   const defaultDistance = Math.max(span, size.z + 4, 8);
+
+  const initialPoses = new Map<
+    string,
+    {
+      objPos: Vector3;
+      objRot: Quaternion;
+      bodyPos: Vector3;
+      bodyRot: Quaternion;
+    }
+  >();
+  for (const part of parts) {
+    const handle = physics.getHandle(part);
+    if (!handle) continue;
+    const bt = handle.body.translation();
+    const br = handle.body.rotation();
+    initialPoses.set(part.name, {
+      objPos: part.position.clone(),
+      objRot: part.quaternion.clone(),
+      bodyPos: new Vector3(bt.x, bt.y, bt.z),
+      bodyRot: new Quaternion(br.x, br.y, br.z, br.w),
+    });
+  }
+
+  const balanceController = chassis
+    ? new BalanceController({
+        chassis,
+        physics,
+        partsByName,
+        onStateChange: options.onBalanceChange,
+      })
+    : null;
 
   function applyFrontView() {
     perspCamera.position.set(center.x, center.y, center.z + defaultDistance);
@@ -513,11 +548,29 @@ export async function createPhysicsScene(
 
   const timer = new Timer();
 
+  function resetPose() {
+    for (const part of parts) {
+      const initial = initialPoses.get(part.name);
+      if (!initial) continue;
+      physics.resetBody(part, initial.bodyPos, initial.bodyRot);
+      part.position.copy(initial.objPos);
+      part.quaternion.copy(initial.objRot);
+    }
+    for (const hinge of LEG_HINGES) {
+      physics.resetMotor(hinge.child, 0);
+    }
+    balanceController?.reset();
+    if (selected) emitSelection(selectionFromPart(selected));
+    emitJoint(jointStateFor(selected));
+  }
+
   function animate() {
     if (disposed) return;
     frame = requestAnimationFrame(animate);
     timer.update();
-    physics.step(Math.min(timer.getDelta(), 1 / 20));
+    const delta = Math.min(timer.getDelta(), 1 / 20);
+    balanceController?.step(delta);
+    physics.step(delta);
     if (selected) emitSelection(selectionFromPart(selected));
     emitJoint(jointStateFor(selected));
     controls.update();
@@ -528,10 +581,20 @@ export async function createPhysicsScene(
 
   const api: PhysicsSceneApi = {
     setGravityEnabled(enabled: boolean) {
+      if (enabled && balanceController?.isGrounded()) {
+        resetPose();
+      }
       physics.setGravityEnabled(enabled);
+      balanceController?.setGravityEnabled(enabled);
     },
     setJointTarget(name: string, angleDeg: number) {
       physics.setJointTarget(name, (angleDeg * Math.PI) / 180);
+    },
+    resetPose() {
+      resetPose();
+    },
+    triggerStepCycle() {
+      balanceController?.triggerStepCycle();
     },
     setView(view: PresetViewName) {
       setView(view);
@@ -555,5 +618,6 @@ export async function createPhysicsScene(
     },
   };
   activeScene = api;
+  (window as any).__PHYSICS_SCENE__ = { parts, physics, balanceController, initialPoses, api };
   return api;
 }

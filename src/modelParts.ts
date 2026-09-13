@@ -48,7 +48,18 @@ export const RIGHT_LEG_HINGES: HingeDef[] = [
 
 export const LEG_HINGES: HingeDef[] = [...LEFT_LEG_HINGES, ...RIGHT_LEG_HINGES];
 
+/** Default hinge limit (±60°) for shoulders and feet. */
 export const HINGE_LIMIT = Math.PI / 3;
+
+/** Upper/lower leg pitch limit (±30°) relative to the authored rest pose. */
+export const LEG_PITCH_LIMIT = Math.PI / 6;
+
+export function hingeLimitsFor(childName: string): { min: number; max: number } {
+  const isUpperOrLowerLeg =
+    childName.startsWith("UpperLeg") || childName.startsWith("LowerLeg");
+  const limit = isUpperOrLowerLeg ? LEG_PITCH_LIMIT : HINGE_LIMIT;
+  return { min: -limit, max: limit };
+}
 
 export function hingeAxisVector(axis: HingeAxis) {
   return axis === "y" ? new Vector3(0, 1, 0) : new Vector3(0, 0, 1);
@@ -153,6 +164,40 @@ export function worldCenterOf(object: Object3D) {
 export function worldOriginOf(object: Object3D) {
   object.updateWorldMatrix(true, false);
   return new Vector3().setFromMatrixPosition(object.matrixWorld);
+}
+
+/**
+ * Authoring pivot location for a hinge joint in world space.
+ *
+ * For pitch joints (+Z axis), aligns the pivot along Z with the limb's common
+ * mechanical centerline (e.g. UpperLegLeft2 / UpperLegRight2 Z centerline)
+ * so cylindrical pins remain seated inside sockets and clevises without
+ * sliding laterally along the rotation axis.
+ *
+ * In the authored Blender model, the LowerLeg and Foot object origins were set
+ * to the outer prong (+/-0.27m), which placed the pivot away from the physical
+ * joint center along the Z axis.
+ */
+export function hingePivotOf(
+  hinge: HingeDef,
+  partsByName: Map<string, Object3D>,
+): Vector3 {
+  const child = partsByName.get(hinge.child);
+  if (!child) return new Vector3();
+  const childOrigin = worldOriginOf(child);
+
+  if (hinge.axis === "z") {
+    // Pitch hinges rotate around the Z axis.
+    // Use the limb root's (UpperLeg) Z centerline so all joints along the leg share
+    // the identical common plane of rotation.
+    const isLeft = hinge.child.includes("Left");
+    const upperLeg = partsByName.get(isLeft ? "UpperLegLeft2" : "UpperLegRight2");
+    const zCenter = upperLeg ? worldOriginOf(upperLeg).z : childOrigin.z;
+    return new Vector3(childOrigin.x, childOrigin.y, zCenter);
+  }
+
+  // Yaw hinges (Shoulders on Chassis around +Y): child origin is the cylinder center.
+  return childOrigin;
 }
 
 export function boundingBoxOf(objects: Object3D[]) {

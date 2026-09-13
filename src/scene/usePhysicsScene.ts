@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 
 import { createPhysicsScene } from "./createPhysicsScene";
 import type {
+  BalanceState,
   JointControlState,
   PhysicsSceneApi,
   PresetViewName,
@@ -14,6 +15,7 @@ export function usePhysicsScene(hostRef: RefObject<HTMLDivElement | null>) {
   const onSelectionRef = useRef<(selection: SelectionInfo | null) => void>(() => {});
   const onJointRef = useRef<(state: JointControlState | null) => void>(() => {});
   const onViewStateRef = useRef<(state: ViewState) => void>(() => {});
+  const onBalanceRef = useRef<(state: BalanceState) => void>(() => {});
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,10 +25,22 @@ export function usePhysicsScene(hostRef: RefObject<HTMLDivElement | null>) {
     isOrtho: false,
     activeView: "front",
   });
+  const [balanceState, setBalanceState] = useState<BalanceState>({
+    active: false,
+    pitchDeg: 0,
+    pitchRateDeg: 0,
+    isPitchingForward: false,
+    adjustmentMagnitude: 0,
+    chassisGrounded: false,
+    status: "idle",
+    steppingPhase: "idle",
+    stepCount: 0,
+  });
 
   onSelectionRef.current = setSelection;
   onJointRef.current = setJoint;
   onViewStateRef.current = setViewState;
+  onBalanceRef.current = setBalanceState;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -39,6 +53,7 @@ export function usePhysicsScene(hostRef: RefObject<HTMLDivElement | null>) {
       onSelectionChange: (next) => onSelectionRef.current(next),
       onJointChange: (next) => onJointRef.current(next),
       onViewStateChange: (next) => onViewStateRef.current(next),
+      onBalanceChange: (next) => onBalanceRef.current(next),
     })
       .then((created) => {
         if (cancelled) {
@@ -69,6 +84,14 @@ export function usePhysicsScene(hostRef: RefObject<HTMLDivElement | null>) {
     apiRef.current?.setJointTarget(name, angleDeg);
   }, []);
 
+  const resetPose = useCallback(() => {
+    apiRef.current?.resetPose();
+  }, []);
+
+  const triggerStepCycle = useCallback(() => {
+    apiRef.current?.triggerStepCycle();
+  }, []);
+
   const setView = useCallback((view: PresetViewName) => {
     apiRef.current?.setView(view);
   }, []);
@@ -83,6 +106,9 @@ export function usePhysicsScene(hostRef: RefObject<HTMLDivElement | null>) {
     selection,
     joint,
     viewState,
+    balanceState,
+    resetPose,
+    triggerStepCycle,
     setGravityEnabled,
     setJointTarget,
     setView,

@@ -36,11 +36,11 @@ export type PhysicsHandle = {
 /** Same material for every part: mass scales with collider volume. */
 export const MATERIAL_DENSITY = 3;
 
-const SEEK_STIFFNESS = 340;
-const SEEK_DAMPING = 52;
-const LOCK_STIFFNESS = 2000;
-const LOCK_DAMPING = 120;
-const ARRIVE_EPS = (3 * Math.PI) / 180;
+const SEEK_STIFFNESS = 3000;
+const SEEK_DAMPING = 200;
+const LOCK_STIFFNESS = 15000;
+const LOCK_DAMPING = 600;
+const ARRIVE_EPS = (1.0 * Math.PI) / 180;
 
 export type HingeBinding = {
   name: string;
@@ -154,6 +154,9 @@ export async function RapierPhysics() {
   const gravityOff = { x: 0, y: 0, z: 0 };
   const world = new RAPIER.World(gravityOff);
   world.timestep = 1 / 60;
+  world.numSolverIterations = 32;
+  world.numInternalPgsIterations = 8;
+  world.numAdditionalFrictionIterations = 8;
   let gravityEnabled = false;
   let pendingGravity: boolean | null = null;
   const dynamics: Object3D[] = [];
@@ -280,6 +283,7 @@ export async function RapierPhysics() {
     ) as RAPIER.RevoluteImpulseJoint;
     joint.setLimits(limits.min, limits.max);
     joint.setContactsEnabled(false);
+    joint.configureMotorModel(RAPIER.MotorModel.ForceBased);
     joint.configureMotorPosition(0, LOCK_STIFFNESS, LOCK_DAMPING);
 
     return {
@@ -359,29 +363,10 @@ export async function RapierPhysics() {
     return Math.atan2(Math.sin(current - target), Math.cos(current - target));
   }
 
-  function matchChildAngvelToParent(binding: HingeBinding) {
-    const parentW = binding.parent.angvel();
-    binding.child.setAngvel({ x: parentW.x, y: parentW.y, z: parentW.z }, true);
-  }
-
-  function snapChildToTarget(motor: MotorState) {
-    const { binding } = motor;
-    const parentRot = copyRotation(binding.parent);
-    const delta = new Quaternion().setFromAxisAngle(binding.axisLocal, motor.targetAngle);
-    const childRot = parentRot.clone().multiply(delta);
-    binding.child.setRotation(
-      { x: childRot.x, y: childRot.y, z: childRot.z, w: childRot.w },
-      true,
-    );
-    matchChildAngvelToParent(binding);
-    motor.currentAngle = motor.targetAngle;
-  }
-
   function holdLocked(motor: MotorState) {
     const { binding } = motor;
-    snapChildToTarget(motor);
-    binding.joint.configureMotorModel(RAPIER.MotorModel.AccelerationBased);
-    binding.joint.configureMotor(motor.targetAngle, 0, LOCK_STIFFNESS, LOCK_DAMPING);
+    binding.joint.configureMotorModel(RAPIER.MotorModel.ForceBased);
+    binding.joint.configureMotorPosition(motor.targetAngle, LOCK_STIFFNESS, LOCK_DAMPING);
   }
 
   function applyTarget(motor: MotorState, target: number) {
@@ -396,10 +381,7 @@ export async function RapierPhysics() {
   }
 
   function lockIfArrived(motor: MotorState) {
-    if (motor.locked) {
-      holdLocked(motor);
-      return;
-    }
+    if (motor.locked) return;
     const error = hingeError(motor.currentAngle, motor.targetAngle);
     if (Math.abs(error) > ARRIVE_EPS) return;
     motor.locked = true;
@@ -421,6 +403,55 @@ export async function RapierPhysics() {
     if (motor) motor.pendingTarget = angle;
   }
 
+  function driveJoint(
+    name: string,
+    targetAngle: number,
+    stiffness = SEEK_STIFFNESS,
+    damping = SEEK_DAMPING,
+  ) {
+    const motor = motors.get(name);
+    if (!motor) return;
+    const { binding } = motor;
+    const clamped = Math.max(binding.limits.min, Math.min(binding.limits.max, targetAngle));
+    motor.targetAngle = clamped;
+    motor.locked = false;
+    binding.joint.configureMotorModel(RAPIER.MotorModel.ForceBased);
+    binding.joint.configureMotorPosition(clamped, stiffness, damping);
+    binding.parent.wakeUp();
+    binding.child.wakeUp();
+  }
+
+  function applyJointTorque(name: string, torque: number) {
+    const motor = motors.get(name);
+    if (!motor) return;
+    const { binding } = motor;
+    motor.locked = false;
+    const childRot = copyRotation(binding.child);
+    const axisWorld = binding.axisLocal.clone().applyQuaternion(childRot).multiplyScalar(torque);
+    binding.child.addTorque({ x: axisWorld.x, y: axisWorld.y, z: axisWorld.z }, true);
+    binding.parent.addTorque({ x: -axisWorld.x, y: -axisWorld.y, z: -axisWorld.z }, true);
+  }
+
+  function resetBody(object: Object3D, position: Vector3, rotation: Quaternion) {
+    const handle = meshMap.get(object);
+    if (!handle) return;
+    handle.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+    handle.body.setRotation({ x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w }, true);
+    handle.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    handle.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    handle.body.wakeUp();
+  }
+
+  function resetMotor(name: string, initialAngle = 0) {
+    const motor = motors.get(name);
+    if (!motor) return;
+    motor.targetAngle = initialAngle;
+    motor.pendingTarget = null;
+    motor.locked = true;
+    motor.currentAngle = initialAngle;
+    holdLocked(motor);
+  }
+
   function step(delta: number) {
     if (pendingGravity !== null) {
       applyGravity(pendingGravity);
@@ -430,13 +461,16 @@ export async function RapierPhysics() {
       if (motor.pendingTarget !== null) {
         applyTarget(motor, motor.pendingTarget);
         motor.pendingTarget = null;
-      } else if (motor.locked) {
-        holdLocked(motor);
       }
     }
 
-    world.timestep = Math.min(delta, 1 / 20);
-    world.step();
+    const clampedDelta = Math.min(delta, 1 / 20);
+    const subSteps = 4;
+    const subDt = clampedDelta / subSteps;
+    world.timestep = subDt;
+    for (let s = 0; s < subSteps; s++) {
+      world.step();
+    }
 
     for (const motor of motors.values()) {
       motor.currentAngle = measuredHingeAngle(motor.binding);
@@ -462,6 +496,10 @@ export async function RapierPhysics() {
     addFixedCuboid,
     bindHinge,
     setJointTarget,
+    driveJoint,
+    applyJointTorque,
+    resetBody,
+    resetMotor,
     hingeAngle,
     jointMotor,
     getHandle,
